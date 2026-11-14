@@ -94,7 +94,7 @@ setInterval(()=>{
 
 async function updateSong(){
  try{
-   const response=await fetch("https://golden-pine-2c7c492e.tunnl.gg/nowplaying.json",{cache:"no-store"});
+   const response=await fetch("https://rusito-fm-ahora-suena.rusorau21.workers.dev/",{cache:"no-store"});
    if(!response.ok)throw new Error("Sin respuesta");
    const data=await response.json();
    document.getElementById("song").textContent=data.title || "Sin información";
