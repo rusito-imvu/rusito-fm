@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RUSITO FM — Radio Online</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;min-height:100vh;display:flex;align-items:center;
+ justify-content:center;padding:20px;
+ background:radial-gradient(circle at top,#38205d,#100d1c 65%);
+ color:white;font-family:Arial,sans-serif
+}
+.radio{
+ width:100%;max-width:430px;text-align:center;padding:35px 25px;
+ border:1px solid #ffffff25;border-radius:28px;
+ background:#ffffff0c;box-shadow:0 20px 70px #0008
+}
+.logo{font-size:65px;margin-bottom:10px}
+h1{font-size:34px;letter-spacing:3px;margin:5px 0}
+.sub{color:#c4a9e9;letter-spacing:4px;font-size:12px}
+.line{height:1px;background:#ffffff25;margin:28px 0}
+.live{color:#ff668d;font-size:13px;letter-spacing:3px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;
+ background:#ff668d;margin-right:8px;box-shadow:0 0 12px #ff668d}
+button{
+ border:0;border-radius:50px;padding:16px 35px;
+ background:linear-gradient(90deg,#a855f7,#ec4899);
+ color:white;font-size:17px;font-weight:bold;margin:22px 0;
+ cursor:pointer
+}
+audio{width:100%;height:42px}
+#status{font-size:13px;color:#c4a9e9;margin-top:15px}
+.footer{font-size:11px;color:#8e83a3;margin-top:30px;letter-spacing:2px}
+</style>
+</head>
+<body>
+<div class="radio">
+ <div class="logo">📻</div>
+ <h1>RUSITO FM</h1>
+ <div class="sub">TU RADIO · TU MÚSICA</div>
+ <div class="line"></div>
+ <div class="live"><span class="dot"></span>TRANSMISIÓN ONLINE</div>
+ <button id="play">▶ ESCUCHAR EN VIVO</button>
+ <audio id="player" controls preload="none"></audio>
+ <div id="status">Radio lista para transmitir</div>
+ <div class="footer">RUSITO FM · HECHA CON MÚSICA ❤️</div>
+</div>
+<script>
+const url="https://golden-pine-2c7c492e.tunnl.gg/radio.mp3";
+const audio=document.getElementById("player");
+const status=document.getElementById("status");
+const button=document.getElementById("play");
+let playing=false,lastProgress=0,retrying=false;
+
+function connect(){
+ if(!playing || retrying)return;
+ retrying=true;
+ status.textContent="Reconectando con la radio...";
+ audio.src=url+"?r="+Date.now();
+ audio.load();
+ audio.play().then(()=>{
+   status.textContent="¡Estás escuchando RUSITO FM!";
+   retrying=false;
+ }).catch(()=>{
+   status.textContent="Esperando conexión... tocá reproducir si hace falta";
+   retrying=false;
+ });
+}
+button.onclick=()=>{
+ playing=true;
+ connect();
+ button.textContent="▶ REPRODUCIR";
+};
+audio.addEventListener("playing",()=>{
+ status.textContent="¡Estás escuchando RUSITO FM!";
+ lastProgress=Date.now();
+ retrying=false;
+});
+audio.addEventListener("timeupdate",()=>lastProgress=Date.now());
+audio.addEventListener("error",()=>{retrying=false;setTimeout(connect,2000)});
+setInterval(()=>{
+ if(playing && !audio.paused && Date.now()-lastProgress>15000){
+   retrying=false;connect();
+ }
+},5000);
+</script>
+</body>
+</html>
