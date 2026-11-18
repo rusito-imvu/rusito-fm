@@ -57,169 +57,238 @@ audio{display:none}
  </main>
 </div>
 <script>
-const audio=document.getElementById("player");
-const status=document.getElementById("status");
-const playBtn=document.getElementById("playBtn");
-const playerHint=document.getElementById("playerHint");
-const volume=document.getElementById("volume");
+const audio = document.getElementById("player");
+const status = document.getElementById("status");
+const playBtn = document.getElementById("playBtn");
+const playerHint = document.getElementById("playerHint");
+const volume = document.getElementById("volume");
+const song = document.getElementById("song");
+const eq = document.getElementById("equalizer");
 
-audio.volume=Number(volume.value);
-volume.addEventListener("input",()=>{
- audio.volume=Number(volume.value);
+const STREAM_URL = "https://rusito-fm-ahora-suena.rusorau21.workers.dev/radio.mp3";
+
+audio.volume = Number(volume.value);
+volume.addEventListener("input", () => {
+  audio.volume = Number(volume.value);
 });
 
-playBtn.addEventListener("click",()=>{
- if(audio.paused){
-  audio.play().catch(()=>{
-   status.textContent="No se pudo conectar. Volvé a tocar reproducir.";
-  });
- }else{
-  audio.pause();
- }
-});
+// Estado de reproducción y reconexión
+let userWantsPlayback = false;
+let reconnectTimer = null;
+let reconnectDelay = 2000;
+let lastProgress = Date.now();
+let waitingSince = 0;
+let reconnecting = false;
 
-audio.addEventListener("pause",()=>{
- stopVisualizer();
- playBtn.textContent="▶";
- playBtn.setAttribute("aria-label","Reproducir");
- playerHint.textContent="Tocá para escuchar";
-});
-
-let lastProgress=Date.now();
-let reconnecting=false;
-
-// Vúmetro real: analiza el audio que reproduce el elemento <audio>
-const eq=document.getElementById("equalizer");
-const bars=[];
-let audioContext=null;
-let analyser=null;
-let frequencyData=null;
-let visualizerFrame=null;
-let sourceNode=null;
-
-for(let i=0;i<28;i++){
- const bar=document.createElement("div");
- bar.className="bar";
- eq.appendChild(bar);
- bars.push(bar);
+function updatePlayerUI(playing) {
+  playBtn.textContent = playing ? "Ⅱ" : "▶";
+  playBtn.setAttribute("aria-label", playing ? "Pausar" : "Reproducir");
+  playerHint.textContent = playing ? "Reproduciendo en vivo" : "Tocá para escuchar";
 }
 
-function startVisualizer(){
- try{
-  const AudioContextClass=window.AudioContext || window.webkitAudioContext;
-  if(!AudioContextClass) throw new Error("AudioContext no disponible");
+async function startPlayback(isReconnect = false) {
+  try {
+    if (isReconnect) {
+      audio.src = STREAM_URL + "?r=" + Date.now();
+      audio.load();
+    }
+    await audio.play();
+    userWantsPlayback = true;
+    return true;
+  } catch (error) {
+    // Si el navegador bloquea el autoplay, necesita el primer toque del usuario.
+    if (error && error.name === "NotAllowedError") {
+      userWantsPlayback = false;
+      reconnecting = false;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      status.textContent = "Tocá reproducir para escuchar en vivo";
+      updatePlayerUI(false);
+      return false;
+    }
 
-  if(!audioContext){
-   audioContext=new AudioContextClass();
-   analyser=audioContext.createAnalyser();
-   analyser.fftSize=256;
-   analyser.smoothingTimeConstant=0.82;
-   frequencyData=new Uint8Array(analyser.frequencyBinCount);
-   sourceNode=audioContext.createMediaElementSource(audio);
-   sourceNode.connect(analyser);
-   analyser.connect(audioContext.destination);
+    if (userWantsPlayback) scheduleReconnect();
+    return false;
+  }
+}
+
+playBtn.addEventListener("click", async () => {
+  if (userWantsPlayback && !audio.paused) {
+    userWantsPlayback = false;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    audio.pause();
+    updatePlayerUI(false);
+    status.textContent = "Radio pausada";
+    return;
   }
 
-  if(audioContext.state==="suspended") audioContext.resume();
-  if(visualizerFrame) cancelAnimationFrame(visualizerFrame);
-
-  const draw=()=>{
-   analyser.getByteFrequencyData(frequencyData);
-   const maxHeight=68;
-   const usableBins=frequencyData.length;
-   bars.forEach((bar,index)=>{
-    const bin=Math.min(usableBins-1,Math.floor(Math.pow(index/(bars.length-1),1.7)*usableBins));
-    const level=frequencyData[bin]/255;
-    const height=Math.max(3,level*maxHeight);
-    bar.style.height=height+"px";
-   });
-   visualizerFrame=requestAnimationFrame(draw);
-  };
-  draw();
- }catch(error){
-  console.warn("No se pudo iniciar el vúmetro:",error);
-  status.textContent="Audio en vivo (visualizador no disponible)";
- }
-}
-
-function stopVisualizer(){
- if(visualizerFrame){
-  cancelAnimationFrame(visualizerFrame);
-  visualizerFrame=null;
- }
- bars.forEach(bar=>bar.style.height="3px");
-}
-
-// Reproductor
-audio.addEventListener("playing",()=>{
- startVisualizer();
- status.textContent="¡Estás escuchando FM REBELDES!";
- playBtn.textContent="Ⅱ";
- playBtn.setAttribute("aria-label","Pausar");
- playerHint.textContent="Reproduciendo en vivo";
- lastProgress=Date.now();
- reconnecting=false;
+  userWantsPlayback = true;
+  reconnectDelay = 2000;
+  status.textContent = "Conectando con FM REBELDES...";
+  await startPlayback();
 });
 
-audio.addEventListener("timeupdate",()=>{
- lastProgress=Date.now();
+audio.addEventListener("pause", () => {
+  stopVisualizer();
+  if (!userWantsPlayback) updatePlayerUI(false);
 });
 
-// Reconexión automática
-function reconnect(){
- if(reconnecting)return;
+audio.addEventListener("playing", () => {
+  reconnecting = false;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  reconnectDelay = 2000;
+  lastProgress = Date.now();
+  waitingSince = 0;
+  status.textContent = "¡Estás escuchando FM REBELDES!";
+  updatePlayerUI(true);
+  startVisualizer();
+});
 
- reconnecting=true;
- status.textContent="Reconectando con FM REBELDES...";
+audio.addEventListener("timeupdate", () => {
+  lastProgress = Date.now();
+});
 
- setTimeout(()=>{
-  audio.src="https://rusito-fm-ahora-suena.rusorau21.workers.dev/radio.mp3?r="+Date.now();
-  audio.load();
+audio.addEventListener("waiting", () => {
+  if (!userWantsPlayback) return;
+  if (!waitingSince) waitingSince = Date.now();
+  status.textContent = "Recuperando señal...";
+});
 
-  audio.play().catch(()=>{
-   status.textContent="Conexión interrumpida. Tocá reproducir.";
-   reconnecting=false;
-  });
+audio.addEventListener("stalled", () => {
+  if (userWantsPlayback) scheduleReconnect();
+});
 
- },2000);
+audio.addEventListener("error", () => {
+  if (userWantsPlayback) scheduleReconnect();
+});
+
+function scheduleReconnect() {
+  if (!userWantsPlayback || reconnectTimer) return;
+
+  reconnecting = true;
+  status.textContent = "Se perdió la señal. Reconectando...";
+  playerHint.textContent = "Reconectando automáticamente";
+
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    if (!userWantsPlayback) {
+      reconnecting = false;
+      return;
+    }
+
+    const connected = await startPlayback(true);
+    if (!connected && userWantsPlayback && !reconnectTimer) {
+      reconnectDelay = Math.min(reconnectDelay * 1.7, 15000);
+      scheduleReconnect();
+    }
+  }, reconnectDelay);
 }
 
-audio.addEventListener("error",()=>{
- reconnecting=false;
- reconnect();
+// Detecta cortes donde el navegador no dispara un evento de error.
+setInterval(() => {
+  if (!userWantsPlayback || audio.paused) return;
+
+  const noProgress = Date.now() - lastProgress > 18000;
+  const waitingTooLong = waitingSince && Date.now() - waitingSince > 12000;
+
+  if (noProgress || waitingTooLong) {
+    scheduleReconnect();
+  }
+}, 4000);
+
+// Vúmetro real: analiza el audio reproducido por el elemento <audio>.
+const bars = [];
+let audioContext = null;
+let analyser = null;
+let frequencyData = null;
+let visualizerFrame = null;
+let sourceNode = null;
+
+for (let i = 0; i < 28; i++) {
+  const bar = document.createElement("div");
+  bar.className = "bar";
+  eq.appendChild(bar);
+  bars.push(bar);
+}
+
+function startVisualizer() {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) throw new Error("AudioContext no disponible");
+
+    if (!audioContext) {
+      audioContext = new AudioContextClass();
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.82;
+      frequencyData = new Uint8Array(analyser.frequencyBinCount);
+      sourceNode = audioContext.createMediaElementSource(audio);
+      sourceNode.connect(analyser);
+      analyser.connect(audioContext.destination);
+    }
+
+    if (audioContext.state === "suspended") audioContext.resume();
+    if (visualizerFrame) cancelAnimationFrame(visualizerFrame);
+
+    const draw = () => {
+      analyser.getByteFrequencyData(frequencyData);
+      const maxHeight = 68;
+      const usableBins = frequencyData.length;
+
+      bars.forEach((bar, index) => {
+        const bin = Math.min(
+          usableBins - 1,
+          Math.floor(Math.pow(index / (bars.length - 1), 1.7) * usableBins)
+        );
+        const level = frequencyData[bin] / 255;
+        bar.style.height = Math.max(3, level * maxHeight) + "px";
+      });
+
+      visualizerFrame = requestAnimationFrame(draw);
+    };
+
+    draw();
+  } catch (error) {
+    console.warn("No se pudo iniciar el vúmetro:", error);
+    status.textContent = "Audio en vivo (visualizador no disponible)";
+  }
+}
+
+function stopVisualizer() {
+  if (visualizerFrame) {
+    cancelAnimationFrame(visualizerFrame);
+    visualizerFrame = null;
+  }
+  bars.forEach(bar => bar.style.height = "3px");
+}
+
+// Intenta iniciar automáticamente al abrir la página.
+// Si el navegador bloquea el audio automático, queda disponible el botón Play.
+window.addEventListener("load", () => {
+  status.textContent = "Intentando iniciar FM REBELDES...";
+  startPlayback();
 });
 
-setInterval(()=>{
- if(!audio.paused && Date.now()-lastProgress>20000){
-  reconnecting=false;
-  reconnect();
- }
-},5000);
+// Información de la canción
+async function updateSong() {
+  try {
+    const response = await fetch(
+      "https://rusito-fm-ahora-suena.rusorau21.workers.dev/",
+      { cache: "no-store" }
+    );
 
-// Información de canción
-async function updateSong(){
- try{
-  const response=await fetch(
-   "https://rusito-fm-ahora-suena.rusorau21.workers.dev/",
-   {cache:"no-store"}
-  );
-
-  if(!response.ok)throw new Error("Sin respuesta");
-
-  const data=await response.json();
-
-  document.getElementById("song").textContent=
-   data.title || "Sin información";
-
- }catch(e){
-  document.getElementById("song").textContent=
-   "Esperando información...";
- }
+    if (!response.ok) throw new Error("Sin respuesta");
+    const data = await response.json();
+    song.textContent = data.title || "Sin información";
+  } catch (error) {
+    song.textContent = "Esperando información...";
+  }
 }
 
 updateSong();
-setInterval(updateSong,5000);
-
+setInterval(updateSong, 5000);
 </script>
 </body>
 </html>
