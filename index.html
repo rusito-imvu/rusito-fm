@@ -26,10 +26,10 @@ audio{display:none}
 .song{margin-top:15px;padding:17px;border-radius:15px;background:#ffffff12;border:1px solid #ffffff20}
 .song-label{font-size:11px;letter-spacing:3px;color:#d4a8ff;margin-bottom:10px}
 #song{font-size:16px;font-weight:bold;overflow-wrap:anywhere}
-.equalizer{height:82px;display:flex;align-items:center;justify-content:center;gap:5px;margin:14px 0 4px;padding:0 2px;overflow:hidden}
-.bar{flex:1 1 0;width:7px;max-width:12px;height:3px;min-height:3px;border-radius:999px;background:linear-gradient(to top,#00aaff,#4deaff);box-shadow:0 0 9px #00cfff,0 0 17px #00cfff55;transition:height .055s linear,background .12s linear,box-shadow .12s linear;will-change:height,background}
+.equalizer{height:88px;display:flex;align-items:flex-end;justify-content:center;gap:5px;margin:14px 0 4px;padding:0 2px 3px;overflow:hidden}
+.bar{flex:1 1 0;width:7px;max-width:12px;height:3px;min-height:3px;border-radius:999px;background:linear-gradient(to top,#087dff,#35eaff);box-shadow:0 0 8px #00cfff99,0 0 15px #00cfff44;transition:height .07s linear,background .16s linear,box-shadow .16s linear;will-change:height,background;transform-origin:bottom}
 #status{font-size:13px;color:#d4a8ff;margin-top:10px}
-@media(max-width:480px){.radio{padding:15px 13px 22px}.custom-player{gap:10px;padding:12px 11px}.play-btn{flex-basis:48px;width:48px;height:48px}.player-title{font-size:12px}.volume-wrap input{width:58px}.equalizer{gap:4px;height:72px}.bar{width:auto;max-width:9px}}
+@media(max-width:480px){.radio{padding:15px 13px 22px}.custom-player{gap:10px;padding:12px 11px}.play-btn{flex-basis:48px;width:48px;height:48px}.player-title{font-size:12px}.volume-wrap input{width:58px}.equalizer{gap:4px;height:78px}.bar{width:auto;max-width:9px}}
 </style>
 </head>
 
@@ -214,25 +214,6 @@ for (let i = 0; i < 28; i++) {
   bars.push(bar);
 }
 
-function colorForLevel(level) {
-  // Azul/cian en bajos, violeta/fucsia en medios y naranja/rojo en picos.
-  const stops = [
-    { p: 0.00, h: 198 },
-    { p: 0.32, h: 222 },
-    { p: 0.55, h: 285 },
-    { p: 0.76, h: 330 },
-    { p: 1.00, h: 12 }
-  ];
-  for (let i = 1; i < stops.length; i++) {
-    if (level <= stops[i].p) {
-      const a = stops[i - 1], b = stops[i];
-      const t = (level - a.p) / (b.p - a.p);
-      return a.h + (b.h - a.h) * t;
-    }
-  }
-  return 12;
-}
-
 function startVisualizer() {
   try {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -256,17 +237,19 @@ function startVisualizer() {
 
     const draw = () => {
       analyser.getByteFrequencyData(frequencyData);
-      const maxHeight = 74;
+      // Margen superior para que ninguna barra se corte en móviles.
+      const maxHeight = Math.max(24, eq.clientHeight - 12);
       const nyquist = audioContext.sampleRate / 2;
       const minHz = 45;
       const maxHz = Math.min(17000, nyquist);
 
       bars.forEach((bar, index) => {
-        // Bandas logarítmicas: evitan que las barras del extremo agudo queden sin datos.
+        // Bandas logarítmicas: todas las barras reciben frecuencias útiles.
         const lowHz = minHz * Math.pow(maxHz / minHz, index / bars.length);
         const highHz = minHz * Math.pow(maxHz / minHz, (index + 1) / bars.length);
         const firstBin = Math.max(1, Math.floor(lowHz / nyquist * frequencyData.length));
-        const lastBin = Math.min(frequencyData.length - 1, Math.max(firstBin + 1, Math.ceil(highHz / nyquist * frequencyData.length)));
+        const lastBin = Math.min(frequencyData.length - 1,
+          Math.max(firstBin + 1, Math.ceil(highHz / nyquist * frequencyData.length)));
 
         let sum = 0;
         let peak = 0;
@@ -279,21 +262,28 @@ function startVisualizer() {
         }
 
         const average = count ? sum / count : 0;
-        const isTreble = lowHz >= 2500;
-        const trebleBoost = isTreble ? 1.32 : 1.0;
-        const raw = Math.min(1, (average * 0.62 + peak * 0.58) * trebleBoost);
-        const amplified = Math.pow(raw, 0.78);
+        const isTreble = lowHz >= 2200;
+        const trebleBoost = isTreble ? 1.55 : (lowHz >= 900 ? 1.18 : 1.0);
+        const raw = Math.min(1, (average * 0.72 + peak * 0.68) * trebleBoost);
+        const amplified = Math.pow(raw, 0.72);
+
+        // Ataque rápido y caída suave: sigue el ritmo sin temblar demasiado.
         const previous = smoothedLevels[index];
-        const smoothing = amplified > previous ? 0.48 : 0.17;
+        const smoothing = amplified > previous ? 0.62 : 0.14;
         const level = previous + (amplified - previous) * smoothing;
         smoothedLevels[index] = level;
 
         const height = 3 + level * maxHeight;
-        const hue = colorForLevel(level);
-        const glow = 7 + level * 15;
+        const glow = 5 + level * 16;
+        const glowAlpha = 0.28 + level * 0.58;
+
         bar.style.height = height.toFixed(1) + "px";
-        bar.style.background = `linear-gradient(to top,hsl(${hue},100%,52%),hsl(${(hue + 22) % 360},100%,68%))`;
-        bar.style.boxShadow = `0 0 ${glow}px hsla(${hue},100%,60%,.95),0 0 ${glow * 1.7}px hsla(${hue},100%,60%,.38)`;
+        // El color queda ordenado verticalmente en TODAS las barras:
+        // azul/cian abajo, violeta/fucsia al medio y naranja/rojo arriba.
+        bar.style.background =
+          "linear-gradient(to top, #087dff 0%, #19dcff 22%, #713cff 43%, #ed28d8 63%, #ff4b72 81%, #ff9a18 100%)";
+        bar.style.boxShadow =
+          `0 0 ${glow}px rgba(0,220,255,${glowAlpha}), 0 0 ${glow * 1.5}px rgba(239,35,214,${glowAlpha * 0.62})`;
       });
 
       visualizerFrame = requestAnimationFrame(draw);
