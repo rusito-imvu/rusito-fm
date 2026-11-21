@@ -223,9 +223,9 @@ function startVisualizer() {
       audioContext = new AudioContextClass();
       analyser = audioContext.createAnalyser();
       analyser.fftSize = 2048;
-      analyser.smoothingTimeConstant = 0.68;
-      analyser.minDecibels = -88;
-      analyser.maxDecibels = -12;
+      analyser.smoothingTimeConstant = 0.42;
+      analyser.minDecibels = -78;
+      analyser.maxDecibels = -18;
       frequencyData = new Uint8Array(analyser.frequencyBinCount);
       sourceNode = audioContext.createMediaElementSource(audio);
       sourceNode.connect(analyser);
@@ -263,13 +263,18 @@ function startVisualizer() {
 
         const average = count ? sum / count : 0;
         const isTreble = lowHz >= 2200;
-        const trebleBoost = isTreble ? 1.55 : (lowHz >= 900 ? 1.18 : 1.0);
-        const raw = Math.min(1, (average * 0.72 + peak * 0.68) * trebleBoost);
-        const amplified = Math.pow(raw, 0.72);
+        // Refuerzo de agudos moderado para que no queden todas las barras arriba.
+        const trebleBoost = isTreble ? 1.12 : (lowHz >= 900 ? 1.06 : 1.0);
 
-        // Ataque rápido y caída suave: sigue el ritmo sin temblar demasiado.
+        // Menos peso del pico instantáneo y una puerta de ruido suave.
+        // Así la altura representa mejor la energía sostenida de cada banda.
+        const measured = (average * 0.82 + peak * 0.18) * trebleBoost;
+        const gated = Math.max(0, (measured - 0.10) * 1.55);
+        const amplified = Math.pow(Math.min(1, gated), 1.35);
+
+        // Ataque ágil y caída gradual, evitando que las barras queden pegadas arriba.
         const previous = smoothedLevels[index];
-        const smoothing = amplified > previous ? 0.62 : 0.14;
+        const smoothing = amplified > previous ? 0.38 : 0.20;
         const level = previous + (amplified - previous) * smoothing;
         smoothedLevels[index] = level;
 
