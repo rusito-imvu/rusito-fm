@@ -26,10 +26,10 @@ audio{display:none}
 .song{margin-top:15px;padding:17px;border-radius:15px;background:#ffffff12;border:1px solid #ffffff20}
 .song-label{font-size:11px;letter-spacing:3px;color:#d4a8ff;margin-bottom:10px}
 #song{font-size:16px;font-weight:bold;overflow-wrap:anywhere}
-.equalizer{height:88px;display:flex;align-items:flex-end;justify-content:center;gap:5px;margin:14px 0 4px;padding:0 2px 3px;overflow:hidden}
-.bar{flex:1 1 0;width:7px;max-width:12px;height:3px;min-height:3px;border-radius:999px;background:linear-gradient(to top,#087dff,#35eaff);box-shadow:0 0 8px #00cfff99,0 0 15px #00cfff44;transition:height .07s linear,background .16s linear,box-shadow .16s linear;will-change:height,background;transform-origin:bottom}
+.equalizer{height:88px;position:relative;margin:14px 0 4px;padding:0 2px;overflow:hidden}
+#waveform{display:block;width:100%;height:100%;overflow:visible}
 #status{font-size:13px;color:#d4a8ff;margin-top:10px}
-@media(max-width:480px){.radio{padding:15px 13px 22px}.custom-player{gap:10px;padding:12px 11px}.play-btn{flex-basis:48px;width:48px;height:48px}.player-title{font-size:12px}.volume-wrap input{width:58px}.equalizer{gap:4px;height:78px}.bar{width:auto;max-width:9px}}
+@media(max-width:480px){.radio{padding:15px 13px 22px}.custom-player{gap:10px;padding:12px 11px}.play-btn{flex-basis:48px;width:48px;height:48px}.player-title{font-size:12px}.volume-wrap input{width:58px}.equalizer{height:78px}}
 </style>
 </head>
 
@@ -52,7 +52,7 @@ audio{display:none}
   <!-- 2. Canción que está sonando -->
   <div class="song"><div class="song-label">🎵 AHORA SUENA</div><div id="song">Buscando canción...</div></div>
   <!-- 3. Vúmetro debajo de la canción -->
-  <div class="equalizer" id="equalizer" aria-label="Vúmetro animado"></div>
+  <div class="equalizer" id="equalizer" aria-label="Visualizador de onda de audio"><canvas id="waveform"></canvas></div>
   <div id="status">Tocá reproducir para escuchar en vivo</div>
  </main>
 </div>
@@ -198,21 +198,49 @@ setInterval(() => {
   }
 }, 4000);
 
-// Vúmetro real: 28 bandas repartidas por frecuencia, con refuerzo suave de agudos.
-const bars = [];
+// Visualizador de onda real: dibuja la forma de onda del audio que reproduce la radio.
+const waveform = document.getElementById("waveform");
+const waveCtx = waveform.getContext("2d");
 let audioContext = null;
 let analyser = null;
-let frequencyData = null;
+let timeData = null;
 let visualizerFrame = null;
 let sourceNode = null;
-let smoothedLevels = Array(28).fill(0);
+let waveSmooth = new Float32Array(512);
 
-for (let i = 0; i < 28; i++) {
-  const bar = document.createElement("div");
-  bar.className = "bar";
-  eq.appendChild(bar);
-  bars.push(bar);
+function resizeWaveform() {
+  const rect = waveform.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  waveform.width = Math.max(1, Math.round(rect.width * dpr));
+  waveform.height = Math.max(1, Math.round(rect.height * dpr));
+  waveCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawIdleWave();
 }
+
+function drawIdleWave() {
+  const w = waveform.clientWidth;
+  const h = waveform.clientHeight;
+  if (!w || !h) return;
+  waveCtx.clearRect(0, 0, w, h);
+  const y = h / 2;
+  const gradient = waveCtx.createLinearGradient(0, 0, w, 0);
+  gradient.addColorStop(0, "#08cfff");
+  gradient.addColorStop(0.48, "#7655ff");
+  gradient.addColorStop(0.72, "#ed35d5");
+  gradient.addColorStop(1, "#ff4b83");
+  waveCtx.beginPath();
+  waveCtx.moveTo(0, y);
+  waveCtx.lineTo(w, y);
+  waveCtx.strokeStyle = gradient;
+  waveCtx.lineWidth = 2;
+  waveCtx.shadowColor = "#a83cff";
+  waveCtx.shadowBlur = 10;
+  waveCtx.stroke();
+  waveCtx.shadowBlur = 0;
+}
+
+window.addEventListener("resize", resizeWaveform);
+resizeWaveform();
 
 function startVisualizer() {
   try {
@@ -222,11 +250,9 @@ function startVisualizer() {
     if (!audioContext) {
       audioContext = new AudioContextClass();
       analyser = audioContext.createAnalyser();
-      analyser.fftSize = 2048;
-      analyser.smoothingTimeConstant = 0.42;
-      analyser.minDecibels = -78;
-      analyser.maxDecibels = -18;
-      frequencyData = new Uint8Array(analyser.frequencyBinCount);
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.72;
+      timeData = new Uint8Array(analyser.fftSize);
       sourceNode = audioContext.createMediaElementSource(audio);
       sourceNode.connect(analyser);
       analyser.connect(audioContext.destination);
@@ -236,77 +262,87 @@ function startVisualizer() {
     if (visualizerFrame) cancelAnimationFrame(visualizerFrame);
 
     const draw = () => {
-      analyser.getByteFrequencyData(frequencyData);
-      // Margen superior para que ninguna barra se corte en móviles.
-      const maxHeight = Math.max(24, eq.clientHeight - 12);
-      const nyquist = audioContext.sampleRate / 2;
-      const minHz = 45;
-      const maxHz = Math.min(17000, nyquist);
+      analyser.getByteTimeDomainData(timeData);
+      const w = waveform.clientWidth;
+      const h = waveform.clientHeight;
+      const mid = h / 2;
+      if (!w || !h) {
+        visualizerFrame = requestAnimationFrame(draw);
+        return;
+      }
 
-      bars.forEach((bar, index) => {
-        // Bandas logarítmicas: todas las barras reciben frecuencias útiles.
-        const lowHz = minHz * Math.pow(maxHz / minHz, index / bars.length);
-        const highHz = minHz * Math.pow(maxHz / minHz, (index + 1) / bars.length);
-        const firstBin = Math.max(1, Math.floor(lowHz / nyquist * frequencyData.length));
-        const lastBin = Math.min(frequencyData.length - 1,
-          Math.max(firstBin + 1, Math.ceil(highHz / nyquist * frequencyData.length)));
+      waveCtx.clearRect(0, 0, w, h);
+      const gradient = waveCtx.createLinearGradient(0, 0, w, 0);
+      gradient.addColorStop(0, "#08d9ff");
+      gradient.addColorStop(0.38, "#397dff");
+      gradient.addColorStop(0.62, "#a33cff");
+      gradient.addColorStop(0.82, "#f02acb");
+      gradient.addColorStop(1, "#ff668f");
 
-        let sum = 0;
-        let peak = 0;
-        let count = 0;
-        for (let bin = firstBin; bin <= lastBin; bin++) {
-          const value = frequencyData[bin] / 255;
-          sum += value;
-          if (value > peak) peak = value;
-          count++;
+      // Suavizado visual de la señal para una onda continua y elegante.
+      const samples = waveSmooth.length;
+      const step = timeData.length / samples;
+      const points = [];
+      let energy = 0;
+      for (let i = 0; i < samples; i++) {
+        const raw = (timeData[Math.floor(i * step)] - 128) / 128;
+        energy += raw * raw;
+        waveSmooth[i] += (raw - waveSmooth[i]) * (Math.abs(raw) > Math.abs(waveSmooth[i]) ? 0.48 : 0.24);
+        points.push({ x: (i / (samples - 1)) * w, y: mid + waveSmooth[i] * h * 0.39 });
+      }
+      const rms = Math.sqrt(energy / samples);
+      const glow = 5 + Math.min(1, rms * 3.2) * 13;
+
+      const strokeWave = () => {
+        waveCtx.beginPath();
+        waveCtx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length - 1; i++) {
+          const xc = (points[i].x + points[i + 1].x) / 2;
+          const yc = (points[i].y + points[i + 1].y) / 2;
+          waveCtx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
         }
+        const last = points[points.length - 1];
+        waveCtx.lineTo(last.x, last.y);
+      };
 
-        const average = count ? sum / count : 0;
-        const isTreble = lowHz >= 2200;
-        // Refuerzo de agudos moderado para que no queden todas las barras arriba.
-        const trebleBoost = isTreble ? 1.12 : (lowHz >= 900 ? 1.06 : 1.0);
+      // Halo exterior y trazo principal, con el mismo degradado en toda la onda.
+      strokeWave();
+      waveCtx.strokeStyle = gradient;
+      waveCtx.lineWidth = 5;
+      waveCtx.lineCap = "round";
+      waveCtx.lineJoin = "round";
+      waveCtx.shadowColor = "#b63cff";
+      waveCtx.shadowBlur = glow * 1.5;
+      waveCtx.globalAlpha = 0.48;
+      waveCtx.stroke();
 
-        // Menos peso del pico instantáneo y una puerta de ruido suave.
-        // Así la altura representa mejor la energía sostenida de cada banda.
-        const measured = (average * 0.82 + peak * 0.18) * trebleBoost;
-        const gated = Math.max(0, (measured - 0.10) * 1.55);
-        const amplified = Math.pow(Math.min(1, gated), 1.35);
-
-        // Ataque ágil y caída gradual, evitando que las barras queden pegadas arriba.
-        const previous = smoothedLevels[index];
-        const smoothing = amplified > previous ? 0.38 : 0.20;
-        const level = previous + (amplified - previous) * smoothing;
-        smoothedLevels[index] = level;
-
-        const height = 3 + level * maxHeight;
-        const glow = 5 + level * 16;
-        const glowAlpha = 0.28 + level * 0.58;
-
-        bar.style.height = height.toFixed(1) + "px";
-        // El color queda ordenado verticalmente en TODAS las barras:
-        // azul/cian abajo, violeta/fucsia al medio y naranja/rojo arriba.
-        bar.style.background =
-          "linear-gradient(to top, #087dff 0%, #19dcff 22%, #713cff 43%, #ed28d8 63%, #ff4b72 81%, #ff9a18 100%)";
-        bar.style.boxShadow =
-          `0 0 ${glow}px rgba(0,220,255,${glowAlpha}), 0 0 ${glow * 1.5}px rgba(239,35,214,${glowAlpha * 0.62})`;
-      });
+      strokeWave();
+      waveCtx.strokeStyle = gradient;
+      waveCtx.lineWidth = 2.2;
+      waveCtx.shadowColor = "#22dfff";
+      waveCtx.shadowBlur = glow;
+      waveCtx.globalAlpha = 1;
+      waveCtx.stroke();
+      waveCtx.globalAlpha = 1;
+      waveCtx.shadowBlur = 0;
 
       visualizerFrame = requestAnimationFrame(draw);
     };
 
     draw();
   } catch (error) {
-    console.warn("No se pudo iniciar el vúmetro:", error);
+    console.warn("No se pudo iniciar el visualizador:", error);
     status.textContent = "Audio en vivo (visualizador no disponible)";
   }
 }
+
 function stopVisualizer() {
   if (visualizerFrame) {
     cancelAnimationFrame(visualizerFrame);
     visualizerFrame = null;
   }
-  bars.forEach(bar => bar.style.height = "3px");
-  smoothedLevels.fill(0);
+  waveSmooth.fill(0);
+  drawIdleWave();
 }
 
 // Intenta iniciar automáticamente al abrir la página.
