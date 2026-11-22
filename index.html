@@ -407,9 +407,8 @@ async function checkWakeStatus() {
     if (!response.ok) throw new Error("Estado todavía no disponible");
     const data = await response.json();
 
-    // Contrato previsto del Worker: wakeAvailable solo será true
-    // cuando el monitor confirme que RADIO 3 está apagada de forma estable.
-    const available = data.wakeAvailable === true;
+    // El Worker informa online:false cuando la radio está apagada o su estado venció.
+    const available = data.online === false;
     wakePanel.classList.toggle("visible", available);
 
     if (!available && data.online === true) {
