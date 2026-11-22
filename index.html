@@ -50,6 +50,12 @@ audio{display:none}
  </div>
  <main class="radio">
   <audio id="player" preload="none" crossorigin="anonymous" src="https://rusito-fm-ahora-suena.rusorau21.workers.dev/radio.mp3"></audio>
+  <section class="wake-panel" id="wakePanel" aria-live="polite">
+   <div class="wake-title">🐻 DJ BEAR SE QUEDÓ DORMIDO</div>
+   <div class="wake-description">La radio está fuera de servicio. ¡Dale un aviso para que vuelva a despertar!</div>
+   <button class="wake-btn" id="wakeBtn" type="button">DESPERTAR A DJ BEAR</button>
+   <div id="wakeStatus"></div>
+  </section>
   <!-- 1. Reproductor inmediatamente debajo de la foto -->
   <div class="custom-player">
    <button id="playBtn" class="play-btn" type="button" aria-label="Reproducir">▶</button>
@@ -64,12 +70,7 @@ audio{display:none}
   <!-- 3. Vúmetro debajo de la canción -->
   <div class="equalizer" id="equalizer" aria-label="Visualizador de onda de audio"><canvas id="waveform"></canvas></div>
   <div id="status">Tocá reproducir para escuchar en vivo</div>
-  <section class="wake-panel" id="wakePanel" aria-live="polite">
-   <div class="wake-title">🐻 DJ BEAR SE QUEDÓ DORMIDO</div>
-   <div class="wake-description">La radio está fuera de servicio. ¡Dale un aviso para que vuelva a despertar!</div>
-   <button class="wake-btn" id="wakeBtn" type="button">DESPERTAR A DJ BEAR</button>
-   <div id="wakeStatus"></div>
-  </section>
+
  </main>
 </div>
 <script>
@@ -407,12 +408,16 @@ async function checkWakeStatus() {
     if (!response.ok) throw new Error("Estado todavía no disponible");
     const data = await response.json();
 
-    // El Worker informa online:false cuando la radio está apagada o su estado venció.
+    // Mostrar el panel solamente cuando el Worker confirma que la radio está apagada.
     const available = data.online === false;
     wakePanel.classList.toggle("visible", available);
 
-    if (!available && data.online === true) {
+    // Cuando Radio 3 vuelve a estar en línea, ocultar el panel y dejar
+    // el botón listo para una futura desconexión.
+    if (data.online === true) {
       wakeStatus.textContent = "";
+      wakeBtn.disabled = false;
+      wakeBtn.textContent = "DESPERTAR A DJ BEAR";
     }
   } catch (error) {
     // Mientras el Worker nuevo no esté publicado, no mostramos un botón
