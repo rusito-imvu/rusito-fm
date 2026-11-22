@@ -30,14 +30,16 @@ audio{display:none}
 #waveform{display:block;width:100%;height:100%;overflow:visible}
 #status{font-size:13px;color:#d6b5ef;margin-top:10px}
 
-/* DESPERTAR A DJ BEAR */
-.wake-panel{display:none;margin-top:18px;padding:18px 16px;border:1px solid #d000ff88;border-radius:18px;background:linear-gradient(135deg,#210d30,#100718);box-shadow:0 0 22px #c000ff30;text-align:center}
-.wake-panel.visible{display:block}
-.wake-title{font-size:15px;font-weight:bold;letter-spacing:1.5px;color:#fff}
-.wake-description{margin:8px 0 14px;font-size:12px;line-height:1.5;color:#ddc9ec}
-.wake-btn{width:100%;max-width:340px;padding:14px 18px;border:1px solid #d000ff;border-radius:999px;background:linear-gradient(135deg,#a000ed,#650b80);color:#fff;font-size:13px;font-weight:bold;letter-spacing:1px;box-shadow:0 0 18px #c000ff65;cursor:pointer}
+/* DESPERTAR A DJ BEAR: capa que bloquea el reproductor mientras está apagado */
+.player-area{position:relative;width:100%;margin:0 auto;min-height:126px}
+.player-area .custom-player{min-height:126px;height:100%}
+.wake-panel{display:none;position:absolute;inset:0;z-index:5;margin:0;padding:12px 14px;border:1px solid #d000ffbb;border-radius:18px;background:linear-gradient(135deg,#210d30f5,#100718f5);box-shadow:0 0 22px #c000ff55;text-align:center;flex-direction:column;align-items:center;justify-content:center;gap:6px}
+.wake-panel.visible{display:flex}
+.wake-title{font-size:14px;font-weight:bold;letter-spacing:1.2px;color:#fff}
+.wake-description{margin:0 0 2px;font-size:11px;line-height:1.35;color:#ddc9ec}
+.wake-btn{width:100%;max-width:340px;padding:11px 16px;border:1px solid #d000ff;border-radius:999px;background:linear-gradient(135deg,#a000ed,#650b80);color:#fff;font-size:12px;font-weight:bold;letter-spacing:1px;box-shadow:0 0 18px #c000ff65;cursor:pointer}
 .wake-btn:disabled{opacity:.65;cursor:wait}
-#wakeStatus{min-height:18px;margin-top:11px;font-size:12px;color:#f0a5e8}
+#wakeStatus{min-height:14px;margin-top:1px;font-size:11px;color:#f0a5e8}
 
 @media(max-width:480px){.radio{padding:15px 13px 22px}.custom-player{gap:10px;padding:12px 11px}.play-btn{flex-basis:48px;width:48px;height:48px}.player-title{font-size:12px}.volume-wrap input{width:58px}.equalizer{height:78px}}
 </style>
@@ -50,20 +52,22 @@ audio{display:none}
  </div>
  <main class="radio">
   <audio id="player" preload="none" crossorigin="anonymous" src="https://rusito-fm-ahora-suena.rusorau21.workers.dev/radio.mp3"></audio>
-  <section class="wake-panel" id="wakePanel" aria-live="polite">
-   <div class="wake-title">🐻 DJ BEAR SE QUEDÓ DORMIDO</div>
-   <div class="wake-description">La radio está fuera de servicio. ¡Dale un aviso para que vuelva a despertar!</div>
-   <button class="wake-btn" id="wakeBtn" type="button">DESPERTAR A DJ BEAR</button>
-   <div id="wakeStatus"></div>
-  </section>
-  <!-- 1. Reproductor inmediatamente debajo de la foto -->
-  <div class="custom-player">
-   <button id="playBtn" class="play-btn" type="button" aria-label="Reproducir">▶</button>
-   <div class="player-info">
-    <div class="player-title">FM REBELDES <span>● EN VIVO</span></div>
-    <div class="player-hint" id="playerHint">Tocá para escuchar</div>
+  <!-- 1. Reproductor con bloqueo de despertar superpuesto -->
+  <div class="player-area">
+   <div class="custom-player">
+    <button id="playBtn" class="play-btn" type="button" aria-label="Reproducir">▶</button>
+    <div class="player-info">
+     <div class="player-title">FM REBELDES <span>● EN VIVO</span></div>
+     <div class="player-hint" id="playerHint">Tocá para escuchar</div>
+    </div>
+    <div class="volume-wrap"><span>♫</span><input id="volume" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volumen"></div>
    </div>
-   <div class="volume-wrap"><span>♫</span><input id="volume" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volumen"></div>
+   <section class="wake-panel" id="wakePanel" aria-live="polite">
+    <div class="wake-title">🐻 DJ BEAR SE QUEDÓ DORMIDO</div>
+    <div class="wake-description">La radio está fuera de servicio. ¡Despertalo para poder escuchar!</div>
+    <button class="wake-btn" id="wakeBtn" type="button">DESPERTAR A DJ BEAR</button>
+    <div id="wakeStatus"></div>
+   </section>
   </div>
   <!-- 2. Canción que está sonando -->
   <div class="song"><div class="song-label">🎵 AHORA SUENA</div><div id="song">Buscando canción...</div></div>
@@ -105,10 +109,10 @@ function updatePlayerUI(playing) {
 
 async function startPlayback(isReconnect = false) {
   try {
-    if (isReconnect) {
-      audio.src = STREAM_URL + "?r=" + Date.now();
-      audio.load();
-    }
+    // Siempre pedir una conexión nueva. Si DJ BEAR acaba de arrancar,
+    // el primer intento puede haber quedado apuntando a una conexión vieja.
+    audio.src = STREAM_URL + "?r=" + Date.now();
+    audio.load();
     await audio.play();
     userWantsPlayback = true;
     return true;
@@ -130,7 +134,9 @@ async function startPlayback(isReconnect = false) {
 }
 
 playBtn.addEventListener("click", async () => {
-  if (userWantsPlayback && !audio.paused) {
+  // Pausar solamente si el audio está reproduciendo de verdad.
+  // Si quedó esperando señal, un toque debe reconectar, no pausarlo.
+  if (userWantsPlayback && !audio.paused && audio.readyState >= 2) {
     userWantsPlayback = false;
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -142,8 +148,10 @@ playBtn.addEventListener("click", async () => {
 
   userWantsPlayback = true;
   reconnectDelay = 2000;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
   status.textContent = "Conectando con FM REBELDES...";
-  await startPlayback();
+  await startPlayback(true);
 });
 
 audio.addEventListener("pause", () => {
